@@ -14,6 +14,9 @@
         "pandas>=3.0.3",
         "pyarrow>=24.0.0",
         "pyrefly>=1.1.1",
+        "scikit-learn>=1.9.0",
+        "seaborn>=0.13.2",
+        "tensorflow>=2.21.0",
         "torch>=2.12.1",
         "torchvision>=0.27.1",
 ]
