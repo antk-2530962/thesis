@@ -9,16 +9,38 @@ A sign language recognition system focused on **streaming, real-time inference**
 | **GISLR** | Fast-iteration dataset — landmarks are pre-extracted | Kaggle competition `asl-signs` | Ready to preprocess/train immediately |
 | **POPSIGN** | Primary dataset (~870GB raw video) | `mrgeislinger/popsign-asl-v1-0-game-train-{a-e,f-m,n-s,t-z}-signs` + `...-game-test` | Requires landmark extraction first |
 
-Raw data is **not stored in this repository**. It's downloaded on demand via `kagglehub` into its default cache (`~/.cache/kagglehub/`), resolved at runtime by `src/modules/paths.py`. GISLR is a Kaggle *competition* download, so your Kaggle account must have accepted the competition rules and `kagglehub` must be authenticated.
+Raw data is **not stored in this repository**. It's downloaded on demand via `kagglehub` into its default cache (`~/.cache/kagglehub/`), resolved at runtime by `src/modules/paths.py`. GISLR is a Kaggle *competition* download, so the Kaggle account in use must have accepted the competition rules and `kagglehub` must be authenticated.
 
 POPSIGN's extracted landmarks (the large intermediate artifact, pre-feature-caching) are written to a separate drive configured via `.env` — see [Environment setup](#environment-setup).
 
 ## Models
 
 - **GRU** (unidirectional `StreamingGRU`) — the implemented baseline, built in `src/gislr.1.model.gru.ipynb`. Chosen because it supports true causal/streaming inference.
-- **Trained runs** live under `src/models/<dataset>/<architecture>/<timestamp>/` — one folder per run, each with a `README.md` (training conditions, performance, evaluation metrics), a `data.md` (exact dataset/subset/split the model was trained on), an `assets/` folder (all PNGs: learning curves, per-class accuracy) and a `cache/` folder (misc artifacts backing the README: per-class CSVs, landmark index lists). `src/models/README.md` is the leaderboard of best-scoring models across datasets and architectures.
-- **Landmark-subset ablations** — motivated by the motion-energy analysis and the Kaggle 1st-place cross-check (`docs/2026-07-15.md`): the **ME-126** subset (hands + upper-body pose + lips + eyes/nose) beats the full-543 baseline **73.73% vs 70.59% val accuracy with half the parameters**. Remaining ablations in `TODO.md` §3.1.
+- **Landmark-subset ablations** — motivated by the motion-energy analysis and the Kaggle 1st-place cross-check ([docs/2026-07-15.md](docs/2026-07-15.md)): the **ME-126** subset (hands + upper-body pose + lips + eyes/nose) beats the full-543 baseline **73.73% vs 70.59% val accuracy with half the parameters**. Remaining ablations in `TODO.md` §3.1.
 - **Planned benchmarks** — 1D-CNN + Transformer (the GISLR 1st-place architecture), LSTM, BiLSTM (offline-only accuracy reference), ST-GCN, TCN, Conformer. See `TODO.md` §4 for scoping notes.
+
+## Model registry
+
+**Leaderboard of best-scoring models per dataset × architecture: [src/models/README.md](src/models/README.md).**
+
+Every training run gets one folder at `src/models/<dataset>/<architecture>/<timestamp>/` containing:
+
+| file | content |
+|---|---|
+| `README.md` | training conditions in detail + performance & evaluation metrics |
+| `data.md` | exact dataset / landmark subset / split the model was trained on |
+| `assets/` | all PNGs referenced by the README (learning curves, per-class accuracy) |
+| `cache/` | misc artifacts backing the README (per-class CSVs, landmark index lists, training script) |
+
+Weights (`*.pt`) are gitignored — the documentation is the committed record.
+
+## Reports
+
+Dated analysis/experiment reports live in [docs/](docs/) — one `docs/<YYYY-MM-DD>.md` per analysis day, figures under `docs/assets/<YYYY-MM-DD>/`.
+
+| date | report | contents |
+|---|---|---|
+| 2026-07-15 | [docs/2026-07-15.md](docs/2026-07-15.md) | GISLR landmark motion-energy analysis (z-noise finding, keep/discard recommendation) · 1st-place solution landmark cross-check · GRU training in detail: full-543 baseline vs ME-126 subset (+3.1 pts at half the parameters) |
 
 ## Project structure
 
@@ -70,7 +92,7 @@ sign2speech/
 - **Dated reports in `docs/`** — every substantial analysis/experiment gets a `docs/<YYYY-MM-DD>.md` write-up with its figures under `docs/assets/<YYYY-MM-DD>/`.
 - **`data/raw/` doesn't exist.** Raw GISLR/POPSIGN data lives in `kagglehub`'s cache and is resolved at runtime by `modules/paths.py` — never duplicated into the repo.
 - **POPSIGN's extracted landmarks go to a separate drive** (configured via `.env`), since that intermediate artifact is far too large to keep alongside the code.
-- **Everything runs from `src/`** — `modules/paths.py` and the notebooks use relative paths (`data/`, `cache/`, `checkpoints/`), and `import modules...` resolves because the notebooks sit next to `modules/`. Point your Jupyter kernel's working directory at `src/`.
+- **Everything runs from `src/`** — `modules/paths.py` and the notebooks use relative paths (`data/`, `cache/`, `checkpoints/`), and `import modules...` resolves because the notebooks sit next to `modules/`. The Jupyter kernel's working directory must point at `src/`.
 
 ## Environment setup
 
@@ -82,10 +104,10 @@ uv sync
 Create a `.env` file at the project root (not committed) with:
 
 ```
-POPSIGN_LANDMARKS_DRIVE=D:/    # or wherever your extraction-output drive is mounted
+POPSIGN_LANDMARKS_DRIVE=D:/    # or wherever the extraction-output drive is mounted
 ```
 
-Make sure your Jupyter kernel uses this project's `uv`-managed virtual environment (`.venv`) and runs with `src/` as its working directory — both the `modules` import and every relative data/cache/checkpoint path depend on it.
+The Jupyter kernel must use this project's `uv`-managed virtual environment (`.venv`) and run with `src/` as its working directory — both the `modules` import and every relative data/cache/checkpoint path depend on it.
 
 ## Running the pipeline
 

@@ -137,8 +137,8 @@ written up in `docs/2026-07-15.md`.** Remaining work moved to §1.8.
   per-landmark pattern, so sample-based landmark analyses can be trusted.
 - [x] Cross-check against the competition 1st-place landmark subset — done in
   `docs/2026-07-15.md` §5: agrees on hands / face-mass-discard / legs / z-drop;
-  diverges on upper-body pose (we keep, they drop) and lips (they keep on
-  linguistic grounds motion energy can't see).
+  diverges on upper-body pose (ME-126 keeps, 1st place drops) and lips (1st
+  place keeps, on linguistic grounds motion energy can't see).
 
 ### 1.8 Follow-ups from the 2026-07-15 findings (report §7)
 
