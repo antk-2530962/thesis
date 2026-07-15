@@ -1,1 +1,0 @@
-project-includes = ["**/*.py*", "**/*.ipynb"]
