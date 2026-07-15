@@ -13,3 +13,4 @@ cache/val_data.npy
 cache/val_offsets.npy
 .gitignore
 gru_best.pt
+src/cache/
