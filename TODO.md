@@ -19,13 +19,21 @@ checkpoints+metrics merged into one per-run folder).
 
 ### 0.1 Stale imports / references broken by the restructure
 
+- [ ] **`src/modules/data/` no longer exists on disk** (2026-07-16): `dataset.py`
+  (`GISLRRawDataset`) and `landmark_worker.py` are gone. `landmark_worker.py` is
+  superseded by `modules/dataset/landmark/extraction.py` (§2); `GISLRRawDataset`
+  needs restoring (from git history or rewrite) before `gislr.1.model.gru.ipynb`
+  can run again.
 - [ ] `src/gislr.1.model.gru.ipynb` imports `from modules.dataset import ...` —
-  actual module is now `modules.data.dataset`.
+  that module path is now taken by the `modules/dataset/` *package* (landmark
+  subsets/extraction); the GISLR dataset class must live elsewhere when restored.
 - [ ] `src/popsign.1.mediapipe.ipynb` imports `from modules.datasets import DATASETS`
   and uses `DATASETS["ISLR"]` — `datasets/` was deleted; it's now
   `modules.paths.DATASETS` with key `"GISLR"`.
 - [ ] `src/modules/` has no `__init__.py` files (the old ones were deleted) — either
   restore them or confirm namespace-package imports work from the `src/` kernel CWD.
+  (`modules/dataset/` and `modules/dataset/landmark/` ship `__init__.py` as of
+  2026-07-16.)
 - [ ] `src/popsign.1.mediapipe.ipynb` currently contains early **GISLR** motion-energy
   exploration code, not POPSIGN extraction — retire that content (superseded by
   `gislr.0.dataset.motion-energy.ipynb`) and rebuild the notebook as the extraction
@@ -162,31 +170,47 @@ written up in `docs/2026-07-15.md`.** Remaining work moved to §1.8.
 
 ## 2. Bulk Landmark Extraction (POPSIGN)
 
-**Decision (resolved):** extracted landmarks go to a **separate drive** configured
-via `POPSIGN_LANDMARKS_DRIVE` in `.env` — too large to live next to the code.
+**Decision (resolved):** extracted landmarks go to **`data/raw/popsign/{train,test}`**,
+rooted at the separate drive configured via `POPSIGN_LANDMARKS_DRIVE` in `.env`
+when set (fallback: `src/data/`, gitignored) — too large to live next to the code.
 
-### 2.1 Fix `modules/data/landmark_worker.py` before any bulk run
+### 2.1 Extraction module — `modules/dataset/landmark/extraction.py` (2026-07-16)
 
-- [ ] **Bug: landmarks are never saved.** `process_video()` collects
-  `pose_frames` / `lh_frames` / `rh_frames` but `np.savez_compressed()` writes only
-  `fps` and `num_frames` — a full extraction run would produce empty archives.
-- [ ] `MODEL_PATH_STRING` points at `tools/mediapipe/tasks/holistic_landmarker.task`,
-  but the task file lives at `src/data/external/mediapipe/tasks/` — resolve via
-  `modules.paths` instead of a hardcoded stale string.
-- [ ] `OUTPUT_DIR` is hardcoded to `./data/landmarks/` — wire it to
-  `POPSIGN_LANDMARKS_DRIVE` from `.env` (and actually populate `.env`, currently empty).
+Replaces the deleted `modules/data/landmark_worker.py` (whose known bugs —
+landmarks never written to the npz, stale hardcoded model path and output dir —
+must not be reproduced):
 
-### 2.2 Bulk run
+- [x] Per-video MediaPipe Holistic extraction saving **all** landmark groups
+  (face + pose + both hands → one `(T, 543, 3)` float16 npz in GISLR holistic
+  row order + fps/num_frames metadata), atomic writes (temp file + `os.replace`).
+  Smoke-validated 2026-07-16: 211-frame video → npz with 7% NaN, hand/pose/face
+  blocks populated.
+- [x] Multiprocess pool **capped at ≤70% of CPU / RAM** (worker count from
+  `cpu_count × 0.70`, workers pinned to 1 math thread, RAM backpressure via
+  `psutil`); MediaPipe is CPU-only on Windows so GPU is not touched.
+  Pool + Windows-spawn path and resume-skip validated on a 4-video run.
+- [x] Output layout `data/raw/popsign/{train,test}/<label>/<id>.npz`, root
+  resolved via `POPSIGN_LANDMARKS_DRIVE` (fallback `src/data/`, gitignored).
 
-- [ ] Rebuild `src/popsign.1.mediapipe.ipynb` as the extraction driver (its current
-  contents are stale GISLR exploration — see §0.1). The old `run_extraction.py`
-  driver was dropped in the restructure.
-- [ ] Resumable bulk extraction with QC manifests (interruption-safe over ~30K
-  videos) — reuse the manifest pattern from §1.2 rather than inventing a second one.
-- [ ] Regenerate/verify the video manifests (`src/data/cache/dataframes/train.csv`,
-  `test.csv`) from `popsign.0.dataset.ipynb` — currently only 1 of 4 POPSIGN train
-  datasets is enabled in `modules/paths.py` (the other three downloads are
-  commented out).
+### 2.2 Extraction driver — `src/popsign.0.dataset.extraction.ipynb` (2026-07-16)
+
+Replaces the deleted `popsign.0.dataset.ipynb` stub as the extraction driver
+(`popsign.1.mediapipe.ipynb` stays stale pending retirement, §0.1):
+
+- [x] Manifest verification (`data/cache/dataframes/{train,test}.csv`) — both
+  verified 2026-07-16 (30,867 train / 33,600 test rows, unique ids, spot-checked
+  paths exist; train covers 72 labels = the 1 enabled dataset).
+- [x] **Pilot batch (≤100 videos) cells built**: seeded sample, worker-count
+  sweep (6/10/14/19) on disjoint 20-video slices under the 70% cap, measured
+  videos/s + frames/s + CPU%, ETA + disk projection (`cache/popsign_extraction/`).
+- [x] Resumable bulk-extraction cells with progress bars + QC section
+  (interruption-safe over ~30K videos) — §1.2 manifest pattern (per-unit artifact
+  before `done`, atomic saves, `failed` retried, batched manifest rewrites).
+- [ ] Run the pilot (user), review videos/s + resource headroom, then run the
+  bulk extraction for train + test.
+- [ ] Regenerate the video manifests with **all 4** POPSIGN train datasets —
+  currently only 1 of 4 is enabled in `modules/paths.py` (the other three
+  downloads are commented out; ~650GB still to download).
 
 ---
 
@@ -195,12 +219,29 @@ via `POPSIGN_LANDMARKS_DRIVE` in `.env` — too large to live next to the code.
 - [x] Motion energy (feeds from §1) — delivered; keep/discard recommendation in
   `docs/2026-07-15.md` §4 (keep: hands 42 + upper-body pose 8 + lips 40 + eyes/
   nose 36 = **ME-126**; discard: 392 face, pose head/legs, z channel).
-- [ ] Within-class consistency + cross-class discriminability (ANOVA-style
-  between/within variance ratio) — the instrument that can actually rank the
-  face landmarks (motion energy sees a flat 0.003 band there) and adjudicate
-  the pose-vs-no-pose divergence with the 1st-place subset.
+- [~] Within-class consistency + cross-class discriminability (2026-07-16) —
+  the instrument that can actually rank the face landmarks (motion energy sees
+  a flat 0.003 band there) and adjudicate the pose-vs-no-pose divergence with
+  the 1st-place subset. Methods chosen: per-landmark **ANOVA F-ratio** and
+  **mutual information** on per-video landmark descriptors, plus a **probe
+  classifier** (logistic regression on descriptors) as the subset-level score.
 - [ ] Position as complementary to gradient saliency and SHAP from trained models
   (not a replacement)
+
+### 3.0 Landmark-subset registry + comparison notebook (2026-07-16)
+
+- [x] `src/modules/dataset/landmark/subsets.py` — canonical registry of every
+  landmark subset in play (FULL_543, FP_118 = 1st-place, ME_126, ME_132,
+  HANDS_42, HANDS_POSE_50, plus component groups) with holistic row indices —
+  `ME_126.array` verified equal to the trained run's `landmarks.npy`.
+- [~] `src/gislr.0.dataset.subset-comparison.ipynb` — built + executing
+  2026-07-16: §3 comparison methods at three scopes: (a) 10 random videos of
+  one random sign class (within-class consistency), (b) all videos of 10 random
+  classes (the motion-energy sample), (c) global (all videos, all classes,
+  per-class stats). Scores every registered subset; results go back into
+  `subsets.py` (`probe_acc_global`).
+- [ ] Feed the winning subset + per-landmark rankings into the §3.1 training
+  ablations.
 
 ### 3.1 Landmark-subset training ablations (GRU, all-else-identical)
 
@@ -222,7 +263,8 @@ Controlled runs that change ONLY the input subset vs the full-543 baseline
 ## 4. Architecture Benchmarking
 
 - [ ] LSTM / BiLSTM baselines vs the existing GRU (BiLSTM offline-only — accuracy
-  reference, never a deployment candidate)
+  reference, never a deployment candidate). `src/gislr.1.model.bilstm.ipynb`
+  exists as an empty stub (2026-07-16).
 - [ ] ST-GCN, TCN, Transformer, Conformer — evaluate against the recurrent baselines
 - [ ] Caution: 1st-place GISLR Kaggle solution found hand-crafted angle/distance
   features didn't help and GCNs underperformed simpler sequence models — keep this
@@ -246,4 +288,4 @@ Controlled runs that change ONLY the input subset vs the full-543 baseline
 
 ---
 
-*Last updated: July 15, 2026*
+*Last updated: July 16, 2026*

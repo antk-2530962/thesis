@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Generic, TypedDict, TypeVar
 
 import kagglehub
 
@@ -7,7 +8,20 @@ CKPT_DIR = Path("checkpoints")
 CACHE_DIR = Path("cache")
 
 
-DATASET_IDS: dict[str, list[str] | str] = {
+T = TypeVar("T")
+
+
+class DatasetMap(TypedDict, Generic[T]):
+    TRAIN: list[T]
+    TEST: T
+    GISLR: T
+
+
+type DatasetIds = DatasetMap[str]
+type Datasets = DatasetMap[Path]
+
+
+DATASET_IDS: DatasetIds = {
     "TRAIN": [
         "mrgeislinger/popsign-asl-v1-0-game-train-a-e-signs",
         "mrgeislinger/popsign-asl-v1-0-game-train-f-m-signs",
@@ -19,7 +33,7 @@ DATASET_IDS: dict[str, list[str] | str] = {
 }
 
 
-DATASETS: dict[str, list[Path] | Path] = {
+DATASETS: Datasets = {
     "TRAIN": [
         Path(kagglehub.dataset_download(DATASET_IDS["TRAIN"][0])),
         # Path(kagglehub.dataset_download(DATASET_IDS["TRAIN"][1])),

@@ -59,18 +59,21 @@ sign2speech/
 │   └── sys_disk_usage.ps1    # disk-usage helper (POPSIGN raw video is ~870GB)
 └── src/                      # all code; notebooks assume the kernel CWD is src/
     ├── gislr.0.dataset.motion-energy.ipynb  # diagnostic: landmark motion-over-time analysis (TODO §1) — executed, see docs/2026-07-15.md
+    ├── gislr.0.dataset.subset-comparison.ipynb  # diagnostic: landmark-subset discriminability comparison (TODO §3) — F-ratio/MI/probe across 3 scopes
     ├── gislr.0.competition.entry.1st.ipynb  # reference: Kaggle GISLR 1st-place solution (1D-CNN + Transformer, 118-landmark subset).
     │                                        #   NOTE: 15MB of animation outputs stripped for repo size; full copy in src/cache/ (gitignored) or Kaggle discussion 406978
     ├── gislr.1.model.gru.ipynb              # feature cache build → GRU training → ONNX → TF → TFLite export
-    ├── popsign.0.dataset.ipynb              # dataset download + video manifests (stub)
-    ├── popsign.1.mediapipe.ipynb            # landmark extraction stage (currently holds early motion-energy exploration)
+    ├── gislr.1.model.bilstm.ipynb           # BiLSTM offline accuracy reference (stub — TODO §4)
+    ├── popsign.0.dataset.extraction.ipynb   # POPSIGN landmark extraction driver: manifests → pilot batch (param tuning + speed) → resumable bulk run (TODO §2)
+    ├── popsign.1.mediapipe.ipynb            # stale (early GISLR motion-energy exploration) — superseded, to be retired (TODO §0.1)
     ├── popsign.2.model.ipynb                # label distribution, train/val/test split, earlier TF model experiments
     ├── popsign.3.pipeline.ipynb             # end-to-end pipeline (stub)
     ├── modules/
     │   ├── paths.py                         # kagglehub downloads + shared Path constants (DATASETS, DATA_DIR, CKPT_DIR, CACHE_DIR)
-    │   └── data/
-    │       ├── dataset.py                   # GISLRRawDataset (memmap-backed, Windows-spawn-safe) + collate_fn
-    │       └── landmark_worker.py           # MediaPipe Holistic per-video extraction worker (multiprocessing)
+    │   └── dataset/
+    │       └── landmark/
+    │           ├── subsets.py               # canonical landmark-subset registry (FULL_543, ME_126, FP_118, …) + holistic index helpers
+    │           └── extraction.py            # MediaPipe Holistic video→landmark extraction (multiprocess, resource-capped, resumable)
     ├── data/                                # gitignored — caches & external assets, never raw datasets
     │   ├── cache/dataframes/                # POPSIGN video manifests (train.csv / test.csv: file_path, label, id)
     │   └── external/mediapipe/tasks/holistic_landmarker.task
@@ -90,8 +93,8 @@ sign2speech/
 - **Notebooks are flat in `src/`, named `<dataset>.<stage>.<topic>.ipynb`** — dataset first, then a stage number ordering the pipeline, then what the stage does. No nested notebook folders.
 - **One folder per training run** at `src/models/<dataset>/<architecture>/<timestamp>/`, holding weights, docs (`README.md` + `data.md`), plots (`assets/`) and eval artifacts (`cache/`) together. A run's artifacts are never split across parallel trees. `src/models/README.md` tracks the best run per dataset × architecture.
 - **Dated reports in `docs/`** — every substantial analysis/experiment gets a `docs/<YYYY-MM-DD>.md` write-up with its figures under `docs/assets/<YYYY-MM-DD>/`.
-- **`data/raw/` doesn't exist.** Raw GISLR/POPSIGN data lives in `kagglehub`'s cache and is resolved at runtime by `modules/paths.py` — never duplicated into the repo.
-- **POPSIGN's extracted landmarks go to a separate drive** (configured via `.env`), since that intermediate artifact is far too large to keep alongside the code.
+- **Raw downloads never enter the repo.** Raw GISLR/POPSIGN data lives in `kagglehub`'s cache and is resolved at runtime by `modules/paths.py` — never duplicated into the repo.
+- **POPSIGN's extracted landmarks go to `data/raw/popsign/{train,test}`**, rooted at the drive configured via `POPSIGN_LANDMARKS_DRIVE` in `.env` when set (falling back to `src/data/`, which is gitignored). The extraction module (`modules/dataset/landmark/extraction.py`) resolves this in one place.
 - **Everything runs from `src/`** — `modules/paths.py` and the notebooks use relative paths (`data/`, `cache/`, `checkpoints/`), and `import modules...` resolves because the notebooks sit next to `modules/`. The Jupyter kernel's working directory must point at `src/`.
 
 ## Environment setup
@@ -114,15 +117,17 @@ The Jupyter kernel must use this project's `uv`-managed virtual environment (`.v
 **GISLR** (landmarks already extracted by Kaggle):
 
 1. `src/gislr.0.dataset.motion-energy.ipynb` — *optional diagnostic*: per-video / per-category / global landmark motion-energy analysis. Not part of the training pipeline. Executed end-to-end; findings and the landmark keep/discard recommendation are in `docs/2026-07-15.md`.
-2. `src/gislr.0.competition.entry.1st.ipynb` — *reference*: the Kaggle 1st-place solution (1D-CNN + Transformer). Kept for the planned architecture port (TODO §4) and for its 118-landmark subset, which the motion-energy findings are cross-checked against.
-3. `src/gislr.1.model.gru.ipynb` — end-to-end: builds the memmapped feature cache (`cache/`, one-time, resumable), trains the `StreamingGRU` with auto-resume checkpointing, plots learning curves, then exports ONNX → TensorFlow SavedModel → TFLite and validates the TFLite model with the grader's exact calling convention.
+2. `src/gislr.0.dataset.subset-comparison.ipynb` — *diagnostic*: landmark-subset discriminability comparison (ANOVA F-ratio, mutual information, probe classifier) at three scopes (10 videos of one class / all videos of 10 classes / global with per-class stats), scoring the subsets registered in `modules/dataset/landmark/subsets.py`.
+3. `src/gislr.0.competition.entry.1st.ipynb` — *reference*: the Kaggle 1st-place solution (1D-CNN + Transformer). Kept for the planned architecture port (TODO §4) and for its 118-landmark subset, which the motion-energy findings are cross-checked against.
+4. `src/gislr.1.model.gru.ipynb` — end-to-end: builds the memmapped feature cache (`cache/`, one-time, resumable), trains the `StreamingGRU` with auto-resume checkpointing, plots learning curves, then exports ONNX → TensorFlow SavedModel → TFLite and validates the TFLite model with the grader's exact calling convention.
 
 **POPSIGN** (raw video, requires extraction first — in progress):
 
-1. `src/popsign.0.dataset.ipynb` — dataset download + video manifest generation (`data/cache/dataframes/`). Currently a stub; the manifests on disk were generated by an earlier iteration.
-2. `src/popsign.1.mediapipe.ipynb` — MediaPipe Holistic landmark extraction over raw video, using `modules/data/landmark_worker.py`. Being repurposed — see `TODO.md` §2.
-3. `src/popsign.2.model.ipynb` — label-distribution analysis, stratified train/val/test split, and earlier TensorFlow model experiments.
-4. `src/popsign.3.pipeline.ipynb` — end-to-end pipeline (stub).
+1. `src/popsign.0.dataset.extraction.ipynb` — the extraction driver: video manifest generation/verification (`data/cache/dataframes/`), a **pilot batch (≤100 videos)** for extraction-parameter optimization and speed measurement, then the resumable bulk run via `modules/dataset/landmark/extraction.py`. See `TODO.md` §2.
+2. `src/popsign.2.model.ipynb` — label-distribution analysis, stratified train/val/test split, and earlier TensorFlow model experiments.
+3. `src/popsign.3.pipeline.ipynb` — end-to-end pipeline (stub).
+
+(`src/popsign.1.mediapipe.ipynb` is stale — it holds early GISLR exploration, superseded by `gislr.0.dataset.motion-energy.ipynb`, and is slated for retirement per `TODO.md` §0.1.)
 
 ## Constraints & known limitations
 
