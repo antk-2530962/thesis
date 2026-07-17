@@ -19,14 +19,16 @@ checkpoints+metrics merged into one per-run folder).
 
 ### 0.1 Stale imports / references broken by the restructure
 
-- [ ] **`src/modules/data/` no longer exists on disk** (2026-07-16): `dataset.py`
+- [x] **`src/modules/data/` no longer exists on disk** (2026-07-16): `dataset.py`
   (`GISLRRawDataset`) and `landmark_worker.py` are gone. `landmark_worker.py` is
-  superseded by `modules/dataset/landmark/extraction.py` (§2); `GISLRRawDataset`
-  needs restoring (from git history or rewrite) before `gislr.1.model.gru.ipynb`
-  can run again.
-- [ ] `src/gislr.1.model.gru.ipynb` imports `from modules.dataset import ...` —
-  that module path is now taken by the `modules/dataset/` *package* (landmark
-  subsets/extraction); the GISLR dataset class must live elsewhere when restored.
+  superseded by `modules/dataset/landmark/extraction.py` (§2). **Resolved
+  2026-07-16:** `GISLRRawDataset` no longer needs restoring — the rebuilt
+  `gislr.1.model.gru.ipynb` defines its dataset in-notebook (in-RAM arrays,
+  `num_workers=0`, the pattern proven by the ME-126 training script).
+- [x] `src/gislr.1.model.gru.ipynb` imports `from modules.dataset import ...` —
+  **resolved 2026-07-16** by the notebook overhaul (§3.1): it now imports only
+  the subset registry (`modules.dataset.landmark.subsets`) and defines the
+  dataset class itself.
 - [ ] `src/popsign.1.mediapipe.ipynb` imports `from modules.datasets import DATASETS`
   and uses `DATASETS["ISLR"]` — `datasets/` was deleted; it's now
   `modules.paths.DATASETS` with key `"GISLR"`.
@@ -66,6 +68,32 @@ checkpoints+metrics merged into one per-run folder).
   Code, markdown and the training-log output are intact. Full copy with outputs:
   `src/cache/gislr.0.competition.entry.1st.with-outputs.ipynb` (gitignored) or
   Kaggle discussion 406978.
+
+### 0.3 Model-run metadata & queryable index (2026-07-17)
+
+Structured run records so "best 3 gru runs on gislr" / "all runs on subset X"
+is a query, not a folder crawl:
+
+- [x] Per-run **`metadata.json`** schema (dataset, architecture, subset, coords,
+  n_params, hyperparameters, train-loop vs canonical accuracies, `eval_status`
+  pending/canonical) — backfilled for all 5 existing gislr/gru runs 2026-07-17.
+- [x] **`scripts/build_model_index.py`** — flattens every run's `metadata.json`
+  into `src/models/index.csv` (committed) and answers filter queries
+  (`--dataset/--architecture/--subset/--top`); warns on runs missing metadata.
+- [x] `gislr.1.model.gru.ipynb` §7 (run-docs cell) now also writes
+  `metadata.json` (preserving canonical-eval fields on re-runs);
+  `scripts/eval_gru.py` promotes `eval_status` to `canonical` after the
+  per-class eval.
+- [x] Run folders are always fresh (2026-07-17): `gislr.1.model.gru.ipynb`'s
+  `resolve_run_dir` no longer reuses/skips a **completed** run — every new
+  training gets a new `<timestamp>` folder (timestamp = training start), even
+  under identical conditions. Auto-resume still continues an *interrupted*
+  run in its own folder.
+- [ ] Future training notebooks (BiLSTM §4, POPSIGN models) must write the same
+  `metadata.json` schema so their runs appear in the index.
+- [ ] Rebuild `index.csv` after the canonical evals of the three pending
+  2026-07-16 runs (§3.1) — FP_118's train-loop 74.60% would displace the
+  ME-126 leader if it holds on the canonical eval.
 
 ---
 
@@ -241,8 +269,10 @@ Replaces the deleted `popsign.0.dataset.ipynb` stub as the extraction driver
   chunks, 0 failures; global descriptors ≈50 min, probes ≈7 min). All 6
   registered subsets scored; `probe_acc_global` written back into
   `subsets.py`; report `docs/2026-07-16.md`.
-- [ ] Feed the winning subset + per-landmark rankings into the §3.1 training
-  ablations (probe predicts: pose helps, pose-wrist points {17-22} don't).
+- [~] Feed the winning subset + per-landmark rankings into the §3.1 training
+  ablations (probe predicts: pose helps, pose-wrist points {17-22} don't) —
+  top-3 probe subsets queued in the rebuilt `gislr.1.model.gru.ipynb`
+  (2026-07-16), awaiting user run.
 - [ ] Candidate new subset: **face-anchor reduction** (eyes/nose 36 → ~8 rigid
   anchors) — the face's discriminative signal is one rigid transform; needs a
   trained ablation before admission to the registry (report §4).
@@ -255,13 +285,26 @@ Replaces the deleted `popsign.0.dataset.ipynb` stub as the extraction driver
 Controlled runs that change ONLY the input subset vs the full-543 baseline
 (`src/models/gislr/gru/20260713-213000`, val acc 70.59%):
 
+**2026-07-16:** `src/gislr.1.model.gru.ipynb` overhauled into the subset-ablation
+driver: trains the top-3 probe subsets (`ME_126`, `ME_132`, `FP_118`) as
+all-else-identical runs (per-subset caches + auto-resume + auto-generated run
+docs), with `TRAIN_SUBSETS`/`COORDS` as the only knobs — the xy ablation below
+is now a one-line config change. Awaiting user run.
+
 - [x] **ME-126, xyz** — done 2026-07-15 (`src/models/gislr/gru/20260715-190729`):
   **73.73% val vs 70.59% baseline (+3.14) with 50.4% fewer params** (0.95M),
   failing classes 22→9. Leaderboard updated in `src/models/README.md`.
-- [ ] Exact 1st-place 118 (ME-126 minus the 8 pose landmarks) — isolates whether
+  (A reproducibility re-run is included in the rebuilt notebook's default
+  `TRAIN_SUBSETS`; drop it there to save ~25 GPU-min.)
+- [~] Exact 1st-place 118 (ME-126 minus the 8 pose landmarks) — isolates whether
   upper-body pose helps a *streaming* model (hand-dropout fallback hypothesis).
+  Queued as `FP_118` in the rebuilt `gislr.1` notebook — awaiting user run.
+- [~] **ME-132** (`ME_126` + pose wrist points {17-22}) — #2 by probe score;
+  tests the probe's prediction that the extra 6 landmarks add nothing. Queued
+  in the rebuilt `gislr.1` notebook — awaiting user run.
 - [ ] ME-126 with **xy only** (drop z; input 252) — tests the z-noise finding
-  in-model rather than only in the motion statistics.
+  in-model rather than only in the motion statistics. (`COORDS = "xy"` in the
+  rebuilt notebook; `scripts/eval_gru.py` also needs an xy mode first.)
 - [ ] ME-126 + lag-1/lag-2 difference features (the 1st-place motion features) —
   note these are causal, so streaming-safe.
 
@@ -295,4 +338,4 @@ Controlled runs that change ONLY the input subset vs the full-543 baseline
 
 ---
 
-*Last updated: July 16, 2026*
+*Last updated: July 17, 2026*

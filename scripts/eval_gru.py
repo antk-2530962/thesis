@@ -10,6 +10,10 @@ Usage:
 If --landmarks is given (a .npy int array of landmark indices into 0..542),
 only those landmarks' xyz are fed to the model (must match the checkpoint's
 feature_dim = 3 * n_landmarks).
+
+Besides the per-class artifacts, the canonical numbers are written into the
+run's metadata.json (eval_status -> "canonical"), so a subsequent
+scripts/build_model_index.py rebuild picks them up in src/models/index.csv.
 """
 import argparse
 import json
@@ -155,6 +159,26 @@ def main():
     }
     (out / "cache" / "eval_summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
+
+    # promote the canonical numbers into the run's metadata.json (the record
+    # scripts/build_model_index.py aggregates into src/models/index.csv)
+    meta_path = out / "metadata.json"
+    if meta_path.is_file():
+        meta = json.loads(meta_path.read_text())
+        meta.update({
+            "eval_status": "canonical",
+            "overall_accuracy": summary["overall_accuracy"],
+            "macro_accuracy": summary["macro_accuracy"],
+            "median_class_accuracy": summary["median_class_accuracy"],
+            "n_classes_below_50pct": summary["n_classes_below_50pct"],
+            "n_val": summary["n_val"],
+        })
+        meta_path.write_text(json.dumps(meta, indent=2))
+        print(f"updated {meta_path} (eval_status=canonical) — rebuild the index "
+              f"with scripts/build_model_index.py")
+    else:
+        print(f"NOTE: no {meta_path} to update — create one so the run is "
+              f"indexed by scripts/build_model_index.py")
 
 
 if __name__ == "__main__":

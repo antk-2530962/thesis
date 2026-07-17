@@ -1,0 +1,19 @@
+{
+  "batch_size": 192,
+  "lr": 0.0003,
+  "hidden_size": 256,
+  "num_layers": 2,
+  "dropout": 0.3,
+  "weight_decay": 0.0001,
+  "epochs": 60,
+  "grad_clip": 5.0,
+  "seed": 42,
+  "max_seq_len": 128,
+  "coords": "xyz",
+  "subset": "ME_132",
+  "n_landmarks": 132,
+  "feature_dim": 396,
+  "n_params": 962578,
+  "num_workers": 0,
+  "training_source": "gislr.1.model.gru.ipynb"
+}

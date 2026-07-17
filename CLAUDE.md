@@ -31,7 +31,7 @@ uv sync                     # install deps (Python >= 3.12; torch cu130 via [too
 
 - **Training is PyTorch + CUDA.** TensorFlow GPU doesn't work on native Windows; TFLite export happens post-hoc via ONNX → TF SavedModel → TFLite (in `gislr.1.model.gru.ipynb`).
 - **MediaPipe extraction is CPU-only** here (GPU delegate is Ubuntu-only), parallelized across worker processes.
-- DataLoader multiprocessing (spawn) is fragile from ad-hoc scripts — in-RAM arrays with `num_workers=0` train GISLR at ~0.3 min/epoch, which is plenty. `GISLRRawDataset` (`src/modules/data/dataset.py`) is memmap-backed and strips its memmap handle in `__getstate__` specifically to survive Windows spawn.
+- DataLoader multiprocessing (spawn) is fragile from ad-hoc scripts — in-RAM arrays with `num_workers=0` train GISLR at ~0.3 min/epoch, which is plenty. This is why `gislr.1.model.gru.ipynb` defines its dataset in-notebook (no spawn pickling to survive); the old memmap-backed `GISLRRawDataset` module was deleted in the restructure and is not coming back.
 
 ## Architecture & conventions
 
@@ -66,7 +66,7 @@ Supporting conventions (`src/gislr.0.dataset.motion-energy.ipynb` is the exempla
 ## Known broken / stale (verify before relying on)
 
 Tracked in TODO §0.1 and §2.1 — highlights:
-- `gislr.1.model.gru.ipynb` imports `modules.dataset`; the real module is `modules.data.dataset`. `popsign.1.mediapipe.ipynb` imports the deleted `modules.datasets`; use `modules.paths.DATASETS` (key `"GISLR"`, not `"ISLR"`).
+- `popsign.1.mediapipe.ipynb` imports the deleted `modules.datasets`; use `modules.paths.DATASETS` (key `"GISLR"`, not `"ISLR"`). (`gislr.1.model.gru.ipynb`'s stale import was fixed by the 2026-07-16 overhaul.)
 - `modules/data/landmark_worker.py` has a critical bug: `np.savez_compressed` writes only `fps`/`num_frames`, **never the landmarks** — plus a stale hardcoded model path and output dir. Fix before any bulk POPSIGN extraction.
 - `popsign.1.mediapipe.ipynb` currently contains stale GISLR exploration, not POPSIGN extraction; `popsign.0` and `popsign.3` are stubs.
 - Only 1 of 4 POPSIGN train dataset downloads is enabled in `modules/paths.py` (others commented out).

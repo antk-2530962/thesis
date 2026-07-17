@@ -3,8 +3,30 @@
 One row per (dataset, architecture): the current best-scoring run and where it
 came from. Every run lives at `models/<dataset>/<architecture>/<timestamp>/`
 with its own `README.md` (training conditions + metrics), `data.md` (exact
-data/subset/split), `assets/` (plots) and `cache/` (eval artifacts). Weights
-are gitignored; the docs are the record.
+data/subset/split), `metadata.json` (machine-readable run record), `assets/`
+(plots) and `cache/` (eval artifacts). Weights are gitignored; the docs are
+the record.
+
+## Queryable index — [index.csv](index.csv)
+
+Every run's `metadata.json` is flattened into one table, [index.csv](index.csv),
+so "best 3 gru runs on gislr" or "all ME_126 runs" is a filter/sort instead of
+a folder crawl. Rebuild + query it (runs from anywhere):
+
+```bash
+.venv/Scripts/python.exe scripts/build_model_index.py                       # rebuild + full leaderboard
+.venv/Scripts/python.exe scripts/build_model_index.py --dataset gislr --architecture gru --top 3
+.venv/Scripts/python.exe scripts/build_model_index.py --subset ME_126
+```
+
+`metadata.json` lifecycle: written by the training notebook's run-docs cell
+(`gislr.1.model.gru.ipynb` §7) with `eval_status: "pending"` and the
+training-loop accuracy (`train_val_acc`); `scripts/eval_gru.py` promotes it to
+`eval_status: "canonical"` by filling `overall_accuracy` / `macro_accuracy` /
+`median_class_accuracy` / `n_classes_below_50pct`. The index's `val_acc`
+column uses the canonical number when present, else `train_val_acc` — check
+`eval_status` before treating a row as leaderboard-comparable. Rebuild
+`index.csv` after each training run or canonical eval.
 
 ## Leaderboard
 
