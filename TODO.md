@@ -89,11 +89,13 @@ is a query, not a folder crawl:
   training gets a new `<timestamp>` folder (timestamp = training start), even
   under identical conditions. Auto-resume still continues an *interrupted*
   run in its own folder.
-- [ ] Future training notebooks (BiLSTM §4, POPSIGN models) must write the same
-  `metadata.json` schema so their runs appear in the index.
-- [ ] Rebuild `index.csv` after the canonical evals of the three pending
-  2026-07-16 runs (§3.1) — FP_118's train-loop 74.60% would displace the
-  ME-126 leader if it holds on the canonical eval.
+- [~] Future training notebooks must write the same `metadata.json` schema —
+  **done for GISLR** (the lstm/bilstm/cnn1d siblings inherit the GRU
+  notebook's §7 emission, 2026-07-17); still applies to future POPSIGN
+  training notebooks.
+- [ ] Rebuild `index.csv` after the canonical evals of the six pending runs
+  (three 2026-07-16 xyz + three 2026-07-17 xy) — the xy runs' train-loop
+  numbers (§3.1) would displace the ME-126 xyz leader if they hold.
 
 ---
 
@@ -302,19 +304,70 @@ is now a one-line config change. Awaiting user run.
 - [~] **ME-132** (`ME_126` + pose wrist points {17-22}) — #2 by probe score;
   tests the probe's prediction that the extra 6 landmarks add nothing. Queued
   in the rebuilt `gislr.1` notebook — awaiting user run.
-- [ ] ME-126 with **xy only** (drop z; input 252) — tests the z-noise finding
-  in-model rather than only in the motion statistics. (`COORDS = "xy"` in the
-  rebuilt notebook; `scripts/eval_gru.py` also needs an xy mode first.)
+- [~] **xy only** (drop z) — tests the z-noise finding in-model. Trained
+  2026-07-17 for all three subsets (v1 regime, `COORDS="xy"`): train-loop val
+  acc **ME_126-xy 74.92 / ME_132-xy 74.95 / FP_118-xy 74.54 — each beats its
+  xyz counterpart** (73.73 / 72.47–74.95 / 74.60), consistent with the z-noise
+  finding. Canonical evals pending. `scripts/eval_gru.py` xy mode added
+  2026-07-17 (reads the checkpoint's `coords` key). **Caveat**: ME_132's two
+  same-config xyz runs differ by ~2.5 pts (72.47 vs 74.95) — run-to-run
+  variance is on the order of the subset deltas, so ablation conclusions need
+  the canonical evals (and ideally repeat runs).
 - [ ] ME-126 + lag-1/lag-2 difference features (the 1st-place motion features) —
   note these are causal, so streaming-safe.
+
+### 3.2 GRU training-regime update (batch ↑, epochs 300, early stopping) — implemented 2026-07-17
+
+`src/gislr.1.model.gru.ipynb` now trains under regime **`v2-plateau-300`**
+(no run executed yet — awaiting user):
+
+- [x] **Batch size 192 → 512**, lr scaled 3e-4 → 1e-3 (16 GB GPU has ample
+  headroom for the ~1M-param models; per-epoch time at 512 untested).
+- [x] **Epochs 60 → 300 (cap) with early stopping** on val-accuracy plateau:
+  no gain > `es_min_delta=1e-3` for `es_patience=15` epochs (both HYP tunables).
+- [x] **Scheduler decision: ReduceLROnPlateau** (factor 0.5, patience 5, on
+  val acc) — watches the same plateau signal as the stopper with shorter
+  patience, so the LR gets a chance to rescue a plateau before the run ends.
+  OneCycleLR dropped (fixed-epoch anneal would be truncated by early stops).
+- [x] Comparability: `metadata.json`/`hyp.json`/checkpoints carry
+  `training_regime` (`v1-onecycle-60` backfilled for all 8 prior runs;
+  `index.csv` has the column). v1 vs v2 runs are not
+  hyperparameter-comparable; canonical eval split/metric unchanged.
+- [x] Resume-safety: plateau counter + scheduler state persist in the
+  checkpoint (`epochs_since_gain`, `finished`); resolve_run_dir resumes only
+  unfinished runs (finished = early-stopped or cap reached).
+- [ ] Run the v2 regime (user) — start with the best subset — and compare
+  against its v1 counterpart on the canonical eval before adopting v2 as the
+  default family.
 
 ---
 
 ## 4. Architecture Benchmarking
 
-- [ ] LSTM / BiLSTM baselines vs the existing GRU (BiLSTM offline-only — accuracy
-  reference, never a deployment candidate). `src/gislr.1.model.bilstm.ipynb`
-  exists as an empty stub (2026-07-16).
+GISLR architecture-benchmark notebooks (filed 2026-07-17): one flat notebook
+per architecture (`gislr.1.model.<arch>.ipynb`), reusing the `gislr.1.model.gru.ipynb`
+pattern — per-subset feature caches, canonical split, auto-resume, one
+timestamped run folder per training start, auto-generated
+`data.md`/`README.md`/`metadata.json` so every run lands in `src/models/index.csv`.
+Train on the best-known subset for comparability with the GRU runs.
+
+- [~] **`gislr.1.model.lstm.ipynb`** — unidirectional `StreamingLSTM`
+  (streaming-viable, direct cell-vs-cell GRU comparison; 1.24M params at
+  hidden 256×2). **Built 2026-07-17** — awaiting user run.
+- [~] **`gislr.1.model.bilstm.ipynb`** — `BiLSTM`, offline-only **accuracy
+  reference, never a deployment candidate** (prices the causality gap;
+  fwd-last + bwd-first readout, 3.0M params). **Built 2026-07-17** (replaced
+  the empty stub) — awaiting user run.
+- [~] **`gislr.1.model.cnn1d.ipynb`** — `CausalConv1D`: 5 dilated causal
+  Conv1d blocks (kernel 5, dilations 1..16, per-frame LayerNorm, 125-frame
+  receptive field ≈ MAX_SEQ_LEN; 1.86M params). Streaming-viable; first step
+  toward the 1st-place port. **Built 2026-07-17** — awaiting user run.
+
+All three verified 2026-07-17 by CPU smoke test: forward shapes correct,
+future-frame corruption provably doesn't change logits for the two causal
+models, and notebook state_dicts load into `scripts/eval_gru.py`'s classes
+with identical logits (the script now dispatches on the checkpoint's `arch`
+key and handles xy/xyz via its `coords` key).
 - [ ] ST-GCN, TCN, Transformer, Conformer — evaluate against the recurrent baselines
 - [ ] Caution: 1st-place GISLR Kaggle solution found hand-crafted angle/distance
   features didn't help and GCNs underperformed simpler sequence models — keep this

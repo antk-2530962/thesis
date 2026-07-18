@@ -1,6 +1,11 @@
-"""Per-class evaluation of a StreamingGRU checkpoint on the canonical val split.
+"""Per-class evaluation of a trained checkpoint on the canonical val split.
 
-Reproduces the val split from gislr.1.model.gru.ipynb (stratified 10%, seed 42)
+Handles every architecture the gislr.1.model.*.ipynb notebooks train (gru,
+lstm, bilstm, cnn1d) by dispatching on the checkpoint's "arch" key (absent in
+pre-2026-07-17 checkpoints -> gru). The model classes below must stay
+byte-identical to their notebook definitions or state_dict loading breaks.
+
+Reproduces the val split from the training notebooks (stratified 10%, seed 42)
 and the dataset preprocessing (NaN->0, uniform subsample to max_seq_len frames).
 Evaluates straight from the raw parquet files — no memmap cache needed.
 
@@ -8,8 +13,9 @@ Usage:
     python eval_gru.py <checkpoint.pt> <out_run_dir> [--landmarks <npy-file>]
 
 If --landmarks is given (a .npy int array of landmark indices into 0..542),
-only those landmarks' xyz are fed to the model (must match the checkpoint's
-feature_dim = 3 * n_landmarks).
+only those landmarks are fed to the model. Coordinate channels follow the
+checkpoint's "coords" key ("xyz" or "xy" — the z-drop ablation), so
+feature_dim = len(coords) * n_landmarks must match.
 
 Besides the per-class artifacts, the canonical numbers are written into the
 run's metadata.json (eval_status -> "canonical"), so a subsequent
@@ -54,11 +60,85 @@ class StreamingGRU(nn.Module):
         return self.head(out.gather(1, idx).squeeze(1))
 
 
-def load_video(path, landmarks=None):
-    table = pq.read_table(path, columns=["x", "y", "z"])
-    data = np.column_stack([table.column(c).to_numpy() for c in ("x", "y", "z")])
+class StreamingLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, num_classes, dropout=0.3):
+        super().__init__()
+        self.input_norm = nn.LayerNorm(input_size)
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True,
+                            dropout=dropout if num_layers > 1 else 0.0, bidirectional=False)
+        self.head = nn.Sequential(nn.LayerNorm(hidden_size), nn.Dropout(dropout),
+                                  nn.Linear(hidden_size, num_classes))
+
+    def forward(self, x, lengths):
+        x = self.input_norm(x)
+        packed = pack_padded_sequence(x, lengths.cpu(), batch_first=True, enforce_sorted=True)
+        packed_out, _ = self.lstm(packed)
+        out, _ = pad_packed_sequence(packed_out, batch_first=True)
+        idx = (lengths - 1).view(-1, 1, 1).expand(-1, 1, out.size(-1)).to(out.device)
+        return self.head(out.gather(1, idx).squeeze(1))
+
+
+class BiLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, num_classes, dropout=0.3):
+        super().__init__()
+        self.input_norm = nn.LayerNorm(input_size)
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True,
+                            dropout=dropout if num_layers > 1 else 0.0, bidirectional=True)
+        self.head = nn.Sequential(nn.LayerNorm(2 * hidden_size), nn.Dropout(dropout),
+                                  nn.Linear(2 * hidden_size, num_classes))
+
+    def forward(self, x, lengths):
+        x = self.input_norm(x)
+        packed = pack_padded_sequence(x, lengths.cpu(), batch_first=True, enforce_sorted=True)
+        packed_out, _ = self.lstm(packed)
+        out, _ = pad_packed_sequence(packed_out, batch_first=True)
+        H = out.size(-1) // 2
+        idx = (lengths - 1).view(-1, 1, 1).expand(-1, 1, H).to(out.device)
+        fwd_last = out[..., :H].gather(1, idx).squeeze(1)
+        bwd_first = out[:, 0, H:]
+        return self.head(torch.cat([fwd_last, bwd_first], dim=-1))
+
+
+class CausalConv1D(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, num_classes,
+                 dropout=0.3, kernel_size=5):
+        super().__init__()
+        self.input_norm = nn.LayerNorm(input_size)
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        ch = input_size
+        for i in range(num_layers):
+            d = 2 ** i
+            self.convs.append(nn.Sequential(
+                nn.ConstantPad1d(((kernel_size - 1) * d, 0), 0.0),
+                nn.Conv1d(ch, hidden_size, kernel_size, dilation=d)))
+            self.norms.append(nn.LayerNorm(hidden_size))
+            ch = hidden_size
+        self.act = nn.GELU()
+        self.drop = nn.Dropout(dropout)
+        self.head = nn.Sequential(nn.LayerNorm(hidden_size), nn.Dropout(dropout),
+                                  nn.Linear(hidden_size, num_classes))
+
+    def forward(self, x, lengths):
+        x = self.input_norm(x).transpose(1, 2)
+        for conv, norm in zip(self.convs, self.norms):
+            x = conv(x).transpose(1, 2)
+            x = self.drop(self.act(norm(x))).transpose(1, 2)
+        out = x.transpose(1, 2)
+        idx = (lengths - 1).view(-1, 1, 1).expand(-1, 1, out.size(-1)).to(out.device)
+        return self.head(out.gather(1, idx).squeeze(1))
+
+
+ARCHS = {"gru": StreamingGRU, "lstm": StreamingLSTM,
+         "bilstm": BiLSTM, "cnn1d": CausalConv1D}
+
+
+def load_video(path, landmarks=None, coords="xyz"):
+    cols = list(coords)
+    table = pq.read_table(path, columns=cols)
+    data = np.column_stack([table.column(c).to_numpy() for c in cols])
     n = data.shape[0] // ROWS_PER_FRAME
-    arr = data.reshape(n, ROWS_PER_FRAME, 3).astype(np.float32)
+    arr = data.reshape(n, ROWS_PER_FRAME, len(cols)).astype(np.float32)
     arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
     if landmarks is not None:
         arr = arr[:, landmarks, :]
@@ -92,11 +172,14 @@ def main():
 
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
     hyp = ckpt["hyp"]
-    model = StreamingGRU(ckpt["feature_dim"], hyp["hidden_size"], hyp["num_layers"],
-                         len(sign2idx), hyp["dropout"]).to(device)
+    arch = ckpt.get("arch", "gru")  # pre-2026-07-17 checkpoints are all GRU
+    coords = ckpt.get("coords", "xyz")  # "xy" for the z-drop ablation runs
+    model = ARCHS[arch](ckpt["feature_dim"], hyp["hidden_size"], hyp["num_layers"],
+                        len(sign2idx), hyp["dropout"]).to(device)
     model.load_state_dict(ckpt["model_state"])
     model.eval()
-    print(f"checkpoint: feature_dim={ckpt['feature_dim']} best_val_acc={ckpt['best_val_acc']:.4f}")
+    print(f"checkpoint: arch={arch} coords={coords} feature_dim={ckpt['feature_dim']} "
+          f"best_val_acc={ckpt['best_val_acc']:.4f}")
 
     paths = [data_dir / p for p in val_split["path"]]
     labels_all = val_split["label"].to_numpy()
@@ -105,7 +188,7 @@ def main():
     t0 = time.time()
     with ThreadPoolExecutor(8) as ex, torch.no_grad():
         for b0 in range(0, len(paths), BATCH):
-            chunk = list(ex.map(lambda p: load_video(p, landmarks), paths[b0:b0 + BATCH]))
+            chunk = list(ex.map(lambda p: load_video(p, landmarks, coords), paths[b0:b0 + BATCH]))
             order = np.argsort([-t for _, t in chunk])
             lengths = torch.tensor([chunk[i][1] for i in order])
             padded = torch.zeros(len(chunk), int(lengths[0]), chunk[0][0].shape[1])

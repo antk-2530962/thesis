@@ -17,7 +17,7 @@ POPSIGN's extracted landmarks (the large intermediate artifact, pre-feature-cach
 
 - **GRU** (unidirectional `StreamingGRU`) — the implemented baseline, built in `src/gislr.1.model.gru.ipynb`. Chosen because it supports true causal/streaming inference.
 - **Landmark-subset ablations** — motivated by the motion-energy analysis and the Kaggle 1st-place cross-check ([docs/2026-07-15.md](docs/2026-07-15.md)): the **ME-126** subset (hands + upper-body pose + lips + eyes/nose) beats the full-543 baseline **73.73% vs 70.59% val accuracy with half the parameters**, and is independently confirmed by the discriminability probe comparison ([docs/2026-07-16.md](docs/2026-07-16.md), best of 6 registered subsets). Canonical subset index lists: `src/modules/dataset/landmark/subsets.py`. Remaining ablations in `TODO.md` §3.1.
-- **Planned benchmarks** — 1D-CNN + Transformer (the GISLR 1st-place architecture), LSTM, BiLSTM (offline-only accuracy reference), ST-GCN, TCN, Conformer. See `TODO.md` §4 for scoping notes.
+- **Architecture benchmarks (notebooks built, runs pending)** — `StreamingLSTM` (streaming-viable), `BiLSTM` (offline-only accuracy reference — prices the causality gap), `CausalConv1D` (dilated causal 1D-CNN, streaming-viable) in `src/gislr.1.model.{lstm,bilstm,cnn1d}.ipynb`, all siblings of the GRU notebook (same split, shared feature caches, same training driver). Still planned: the full 1st-place 1D-CNN + Transformer port, ST-GCN, TCN, Conformer. See `TODO.md` §4.
 
 ## Model registry
 
@@ -45,7 +45,7 @@ Dated analysis/experiment reports live in [docs/](docs/) — one `docs/<YYYY-MM-
 |---|---|---|
 | 2026-07-15 | [docs/2026-07-15.md](docs/2026-07-15.md) | GISLR landmark motion-energy analysis (z-noise finding, keep/discard recommendation) · 1st-place solution landmark cross-check · GRU training in detail: full-543 baseline vs ME-126 subset (+3.1 pts at half the parameters) |
 | 2026-07-16 | [docs/2026-07-16.md](docs/2026-07-16.md) | Landmark-subset discriminability comparison (F-ratio / MI / probe classifier, 3 scopes): **ME-126 wins**; discriminability ≠ motion energy (rho −0.12); FULL-543 worst even for a linear probe · POPSIGN extraction module + driver notebook (resource-capped, resumable) built & validated |
-| 2026-07-17 | [docs/2026-07-17.md](docs/2026-07-17.md) | Registry tooling: per-run `metadata.json` + queryable `src/models/index.csv` (`scripts/build_model_index.py`), canonical-eval promotion via `eval_gru.py` · fresh-run-folder policy (completed runs never reused) · index snapshot: FP-118 train-loop 74.60% pending canonical eval |
+| 2026-07-17 | [docs/2026-07-17.md](docs/2026-07-17.md) | Registry tooling: per-run `metadata.json` + queryable `src/models/index.csv` · fresh-run-folder policy · training regime **v2-plateau-300** (batch 512, epoch cap 300, early stopping, ReduceLROnPlateau) · LSTM / BiLSTM / CausalConv1D benchmark notebooks built · `eval_gru.py` generalized (arch dispatch + xy mode) · xy z-drop runs beat xyz on train-loop acc (canonical evals pending) |
 
 ## Project structure
 
@@ -60,7 +60,7 @@ sign2speech/
 │   ├── <YYYY-MM-DD>.md       # one report per analysis day (e.g. 2026-07-15.md: motion-energy + 1st-place cross-check)
 │   └── assets/<YYYY-MM-DD>/  # figures referenced by that report
 ├── scripts/
-│   ├── eval_gru.py           # per-class val evaluation of a StreamingGRU checkpoint (run with CWD anywhere; reads raw parquet); updates the run's metadata.json
+│   ├── eval_gru.py           # canonical per-class val evaluation of any trained checkpoint (gru/lstm/bilstm/cnn1d via the checkpoint's arch key, xy/xyz via coords; run with CWD anywhere); updates the run's metadata.json
 │   ├── build_model_index.py  # flattens all run metadata.json files into src/models/index.csv + answers filter queries (run with CWD anywhere)
 │   └── sys_disk_usage.ps1    # disk-usage helper (POPSIGN raw video is ~870GB)
 └── src/                      # all code; notebooks assume the kernel CWD is src/
@@ -68,8 +68,10 @@ sign2speech/
     ├── gislr.0.dataset.subset-comparison.ipynb  # diagnostic: landmark-subset discriminability comparison (TODO §3) — F-ratio/MI/probe across 3 scopes
     ├── gislr.0.competition.entry.1st.ipynb  # reference: Kaggle GISLR 1st-place solution (1D-CNN + Transformer, 118-landmark subset).
     │                                        #   NOTE: 15MB of animation outputs stripped for repo size; full copy in src/cache/ (gitignored) or Kaggle discussion 406978
-    ├── gislr.1.model.gru.ipynb              # per-subset feature caches → all-else-identical GRU runs (top-3 probe subsets) → run docs → (deferred) TFLite export
-    ├── gislr.1.model.bilstm.ipynb           # BiLSTM offline accuracy reference (stub — TODO §4)
+    ├── gislr.1.model.gru.ipynb              # per-subset feature caches → GRU runs (top-3 probe subsets, regime v2-plateau-300) → run docs → (deferred) TFLite export
+    ├── gislr.1.model.lstm.ipynb             # StreamingLSTM benchmark (streaming-viable) — sibling of the GRU notebook, shares its caches (TODO §4)
+    ├── gislr.1.model.bilstm.ipynb           # BiLSTM offline-only accuracy reference — never a deployment candidate (TODO §4)
+    ├── gislr.1.model.cnn1d.ipynb            # CausalConv1D benchmark (dilated causal 1D-CNN, streaming-viable) (TODO §4)
     ├── popsign.0.dataset.extraction.ipynb   # POPSIGN landmark extraction driver: manifests → pilot batch (param tuning + speed) → resumable bulk run (TODO §2)
     ├── popsign.1.mediapipe.ipynb            # stale (early GISLR motion-energy exploration) — superseded, to be retired (TODO §0.1)
     ├── popsign.2.model.ipynb                # label distribution, train/val/test split, earlier TF model experiments
@@ -127,7 +129,8 @@ The Jupyter kernel must use this project's `uv`-managed virtual environment (`.v
 1. `src/gislr.0.dataset.motion-energy.ipynb` — *optional diagnostic*: per-video / per-category / global landmark motion-energy analysis. Not part of the training pipeline. Executed end-to-end; findings and the landmark keep/discard recommendation are in `docs/2026-07-15.md`.
 2. `src/gislr.0.dataset.subset-comparison.ipynb` — *diagnostic*: landmark-subset discriminability comparison (ANOVA F-ratio, mutual information, probe classifier) at three scopes (10 videos of one class / all videos of 10 classes / global with per-class stats), scoring the subsets registered in `modules/dataset/landmark/subsets.py`.
 3. `src/gislr.0.competition.entry.1st.ipynb` — *reference*: the Kaggle 1st-place solution (1D-CNN + Transformer). Kept for the planned architecture port (TODO §4) and for its 118-landmark subset, which the motion-energy findings are cross-checked against.
-4. `src/gislr.1.model.gru.ipynb` — the training stage (overhauled 2026-07-16): builds one feature cache per landmark subset (skip-if-exists, atomic writes), then trains one all-else-identical `StreamingGRU` run per subset in `TRAIN_SUBSETS` (default: the top-3 discriminability subsets `ME_126`, `ME_132`, `FP_118`) with per-subset auto-resume, one registry run folder each (always a fresh timestamped folder per training start — completed runs are never reused, only interrupted ones are resumed), and auto-generated `data.md`/`README.md`/`metadata.json` drafts. Per-class evaluation is handed off to `scripts/eval_gru.py` (commands printed by the notebook); the ONNX → TensorFlow → TFLite export chain is kept as a deferred, run-folder-parameterized final section for the later Kaggle-submission step.
+4. `src/gislr.1.model.gru.ipynb` — the training stage (overhauled 2026-07-16; training regime **v2-plateau-300** since 2026-07-17: batch 512, lr 1e-3, ReduceLROnPlateau, epoch cap 300 with early stopping on val-accuracy plateau): builds one feature cache per landmark subset (skip-if-exists, atomic writes), then trains one `StreamingGRU` run per subset in `TRAIN_SUBSETS` (default: the top-3 discriminability subsets `ME_126`, `ME_132`, `FP_118`) with per-subset auto-resume, one registry run folder each (always a fresh timestamped folder per training start — completed runs are never reused, only interrupted ones are resumed), and auto-generated `data.md`/`README.md`/`metadata.json` drafts. Per-class evaluation is handed off to `scripts/eval_gru.py` (commands printed by the notebook); the ONNX → TensorFlow → TFLite export chain is kept as a deferred, run-folder-parameterized final section for the later Kaggle-submission step.
+5. `src/gislr.1.model.{lstm,bilstm,cnn1d}.ipynb` — architecture benchmarks (TODO §4), built 2026-07-17 as siblings of the GRU notebook: identical split/caches/driver/run-doc emission, differing only in the architecture-identity block, the default `TRAIN_SUBSETS` (`ME_126` only) and the model class. `bilstm` is an **offline-only accuracy reference** (never a deployment candidate); `lstm` and `cnn1d` are streaming-viable. Runs pending.
 
 **POPSIGN** (raw video, requires extraction first — in progress):
 

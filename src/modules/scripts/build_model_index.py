@@ -35,7 +35,7 @@ LEAD_COLUMNS = [
     "median_class_accuracy", "n_classes_below_50pct", "train_val_acc",
     "n_landmarks", "feature_dim", "n_params", "n_classes", "n_val", "split",
     "model_name", "streaming", "trained_date", "training_source",
-    "epochs", "best_epoch",
+    "training_regime", "epochs", "best_epoch", "early_stopped",
 ]
 
 
