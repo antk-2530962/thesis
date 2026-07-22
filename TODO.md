@@ -51,9 +51,14 @@ docs daily/weekly/reports split).
   cu130 build that resolves for the full `requires-python` range). `uv sync`
   verified: torch 2.13.0+cu130, CUDA available.
 - [x] `pyproject.toml`: placeholder description replaced (2026-07-15).
-- [ ] Type checker: `pyrefly.toml` was deleted but `pyrefly` is still a runtime
-  dependency, and the dev group also pulls in `ty` — pick one, drop the other, and
-  move it to the dev group.
+- [x] **Type checker: `ty` chosen, `pyrefly` dropped (2026-07-22).** `pyrefly`
+  had no config left (`pyrefly.toml` was deleted) while `ty` already had a
+  working `[tool.ty.environment]` block; `pyrefly>=1.1.1` removed from
+  `[project].dependencies` and `uv sync` re-run (clean single-package
+  uninstall, torch untouched). `ty` stays in `[dependency-groups].dev`. Run via
+  `.venv/Scripts/ty.exe check` from `src/` (35 pre-existing diagnostics as of
+  2026-07-22, mostly in the stale `popsign.2`/`popsign.3` notebooks — not
+  triaged, just confirming the tool runs).
 - [ ] `.gitignore`: the bare `data/` pattern also ignores `src/data/external/`
   (the MediaPipe `holistic_landmarker.task`) and `src/data/cache/dataframes/`
   (POPSIGN manifests) — decide whether to narrow the ignore and commit those, or
