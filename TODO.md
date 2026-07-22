@@ -159,9 +159,10 @@ docs/
   (assets subfolders move with them).
 - [x] Update every reference: `docs/README.md`, `README.md` (report table +
   project-structure block + conventions), `CLAUDE.md`, this file.
-- [ ] Backfill the standalone reports that currently live only as daily entries
+- [x] Backfill the standalone reports that currently live only as daily entries
   (motion-energy, subset-comparison) into `docs/reports/<topic>.md`, leaving the
-  daily logs as the dated narrative that links to them.
+  daily logs as the dated narrative that links to them. **Done 2026-07-22**:
+  `docs/reports/motion-energy.md` and `docs/reports/subset-comparison.md`.
 - [x] **Weekly logs started 2026-07-19**: `docs/logs/weekly/2026-29.md` (Jul 12–18)
   and `2026-30.md` (Jul 19–25, running). **Week numbering corrected**: weeks run
   **Sunday → Saturday**, week 1 = the week containing Jan 1 — *not* ISO, which
@@ -184,6 +185,13 @@ docs/
 - [ ] `modules/paths.py::resolve_datasets` (uncommitted working-tree change)
   hardcodes `D:/`/`E:/` `PATH_PARTS` and calls `p.unlink()` on directories
   (raises on a real directory) — reconcile with the `.env`-driven policy.
+  **Status 2026-07-22**: this is the actual change that downloaded the
+  remaining 3 of 4 POPSIGN train dataset parts (§2.2) — `train-n-s-signs` to
+  `D:/datasets/…` (complete 07-20) and `train-t-z-signs` to `E:/datasets/…`
+  (complete 07-21) — so it did its job, but it's still uncommitted and still
+  hardcoded rather than `.env`-driven. `src/temp.py` (untracked) is a scratch
+  copy of an earlier version of this file, used to manually trigger the
+  a-e/f-m downloads by hand — clean up both once the real fix is committed.
 - [ ] `.env` is empty/missing at the repo root, so `POPSIGN_LANDMARKS_DRIVE`
   is unset and extraction output falls back into `src/data/raw/popsign`.
 
@@ -368,26 +376,38 @@ Replaces the deleted `popsign.0.dataset.ipynb` stub as the extraction driver
   30,867 train / 33,600 test, verified against the raw tree (ids unique, every
   label agreeing with the sign encoded in its filename, spot-checked paths all
   present). The pilot is **no longer blocked**.
-- [ ] Regenerate again with **all 4** POPSIGN train datasets — currently only 1
-  of 4 is enabled in `modules/paths.py::resolve_datasets` (~650GB still to
-  download). Consequence today: **train covers 72 labels but test covers all
-  250**, so 178 test labels have no train videos. Extracting test in full is
-  still correct (landmarks are cheap and never need redoing); those classes just
-  aren't trainable yet. Re-running the §1 cell with `FORCE_REGENERATE = True`
-  after enabling the parts extends the train manifest, and the bulk run picks up
-  the difference incrementally.
-- [~] Run the pilot (user), review videos/s + resource headroom, then run the
+- [x] All 4 POPSIGN train dataset parts are now downloaded (2026-07-21) — see
+  §0.6: `train-n-s-signs` → `D:/datasets/…` (complete 07-20 17:19),
+  `train-t-z-signs` → `E:/datasets/…` (complete 07-21 16:29), `a-e`/`f-m`
+  already in the default kagglehub cache. ~650GB that was outstanding all last
+  week is now on disk.
+- [ ] **Regenerate the train manifest** — `data/cache/popsign/dataframes/train.csv`
+  was last written 2026-07-19 17:51, *before* the 3 new parts finished, so it
+  still reflects only the old 72-label / 30,867-video single-part state. Consequence
+  today: **train still covers only 72 labels while test covers all 250**, so 178
+  test labels have no train videos yet — purely because the manifest hasn't been
+  regenerated, not because the video is missing. Re-run §1 of
+  `popsign.0.dataset.extraction.ipynb` with `FORCE_REGENERATE = True` before
+  starting the train bulk run.
+- [x] Run the pilot (user), review videos/s + resource headroom, then run the
   bulk extraction for train + test:
   ```
   .venv/Scripts/python.exe src/modules/scripts/extract_popsign.py pilot
   .venv/Scripts/python.exe src/modules/scripts/extract_popsign.py run train --confidence default
   ```
-  **Test split running since 2026-07-19 13:43 UTC** — 15,549/33,600 done, **1 failed**,
-  1.46 videos/s wall, mean 67.1 frames/video, ETA ~3.5 h. Output lands in
-  `src/data/raw/popsign/test/` (`POPSIGN_LANDMARKS_DRIVE` still unset, §0.6);
-  ~165 KB/video projects to **~5.4 GB** for the full split. Confirms the
-  resolution-change fix (§2.1) holds at scale — 15.5K videos, zero deadlocks.
-  Then: `run train`.
+  **Test split: done 2026-07-20 02:06** — 33,599/33,600, **1 failed** (unchanged
+  from initial report — investigate below), 1.461 videos/s wall, 8 workers,
+  6.4 h total wall time. Output in `src/data/raw/popsign/test/`
+  (`POPSIGN_LANDMARKS_DRIVE` still unset, §0.6); confirmed the resolution-change
+  fix (§2.1) holds at scale across the full 33.6K videos, zero deadlocks.
+  **Train: not started** — 0/30,867 done, blocked on the manifest regeneration
+  above. A second pilot run on 2026-07-20 (post test-split, pre-manifest-regen)
+  measured only 0.246–0.365 videos/s at 4–8 workers — **roughly a quarter of**
+  what the test bulk run sustained at 8 workers. Likely explanation: the pilot's
+  window overlaps the `train-n-s-signs` download finishing on the same drive
+  that day, but this hasn't been confirmed — **re-run the pilot with no
+  concurrent downloads before picking a worker count for the train run.**
+  Full write-up: `docs/logs/weekly/2026-30.md` §3.
 - [ ] Investigate the one failed test video —
   `gtsignstudy4a.8035-into-2023_01_30_12_00_12.563-0`, `cv2` cannot open the source
   mp4. Likely a truncated/corrupt download rather than an extraction bug; the
@@ -1030,4 +1050,4 @@ an unattributable result.
 
 ---
 
-*Last updated: July 19, 2026 (bulk test-split extraction running · output-inspection notebook · weekly logs started, week numbering set to Sunday-start)*
+*Last updated: July 22, 2026 (POPSIGN test-split extraction finished · all 4 train dataset parts downloaded, train manifest regeneration still pending · motion-energy and subset-comparison reports backfilled)*
