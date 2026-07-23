@@ -28,6 +28,12 @@ uv sync                     # install deps (Python >= 3.12; torch cu130 via [too
 - Type checking: `ty` is canonical (`[tool.ty.environment]` points at `./.venv`) — run `.venv/Scripts/ty.exe check` from `src/`. `pyrefly` was dropped 2026-07-22 (TODO §0.2).
 - No `jq` on this machine — parse notebook JSON with `.venv/Scripts/python.exe -c "import json; ..."`.
 
+## Git workflow
+
+- **Create a Git commit after completing each logical unit of work** — don't batch unrelated changes into one commit.
+- **Automatically stage modified files** with `git add` as part of committing.
+- **Always format messages as [conventional commits](https://www.conventionalcommits.org/)** (e.g. `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`).
+
 ## Windows constraints (shape architecture decisions)
 
 - **Training is PyTorch + CUDA.** TensorFlow GPU doesn't work on native Windows; TFLite export happens post-hoc by rebuilding the model in native Keras and transferring weights (`modules/model/keras_export.py`, driven by `gislr.2.models.evaluation.ipynb`) — the ONNX/onnx2tf route was tried and abandoned (TODO §6.2).
